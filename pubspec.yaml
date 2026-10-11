@@ -1,0 +1,45 @@
+name: thermal_printer_kit
+description: >-
+  Print receipts on thermal printers over Bluetooth (Classic and BLE), USB,
+  Wi-Fi/LAN, printer drivers or the print dialog. ESC/POS, Star Line and StarPRNT.
+version: 0.1.0
+repository: https://github.com/sumonwd/thermal_printer_kit
+issue_tracker: https://github.com/sumonwd/thermal_printer_kit/issues
+topics:
+  - printer
+  - thermal-printer
+  - esc-pos
+  - bluetooth
+  - receipt
+
+environment:
+  sdk: ^3.8.0
+  flutter: ">=3.32.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  ffi: ^2.1.4
+  pdf: ^3.12.0
+  printing: ^5.14.2
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  plugin:
+    platforms:
+      android:
+        package: com.sumonwd.thermal_printer_kit
+        pluginClass: ThermalPrinterKitPlugin
+      ios:
+        pluginClass: ThermalPrinterKitPlugin
+      # No native code on desktop: sockets, the Windows spooler (FFI) and `printing`
+      windows:
+        dartPluginClass: ThermalPrinterKitDesktop
+      macos:
+        dartPluginClass: ThermalPrinterKitDesktop
+      linux:
+        dartPluginClass: ThermalPrinterKitDesktop
