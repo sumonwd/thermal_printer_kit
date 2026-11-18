@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pdf/widgets.dart' as pw;
+import 'package:thermal_printer_kit/src/snmp.dart';
 import 'package:thermal_printer_kit/thermal_printer_kit.dart';
 
 /// A 16 x 3 image: row 0 all black, row 1 only the first dot, row 2 blank.
@@ -22,6 +23,28 @@ int indexOf(List<int> bytes, List<int> pattern, [int start = 0]) {
     if (match) return i;
   }
   return -1;
+}
+
+/// An SNMP v1 GetResponse to request [id]: [value] as text, or a noSuchName
+/// error when it is null.
+List<int> snmpResponse(int id, String? value) {
+  List<int> tlv(int tag, List<int> v) => [tag, v.length, ...v];
+  return tlv(0x30, [
+    ...tlv(0x02, [0]),
+    ...tlv(0x04, 'public'.codeUnits),
+    ...tlv(0xA2, [
+      ...tlv(0x02, [id]),
+      ...tlv(0x02, [value == null ? 2 : 0]),
+      ...tlv(0x02, [value == null ? 1 : 0]),
+      ...tlv(
+        0x30,
+        tlv(0x30, [
+          ...tlv(0x06, [0x2B, 6, 1, 2, 1, 1, 5, 0]),
+          ...(value == null ? [0x05, 0x00] : tlv(0x04, value.codeUnits)),
+        ]),
+      ),
+    ]),
+  ]);
 }
 
 int count(List<int> bytes, List<int> pattern) {
@@ -54,7 +77,8 @@ void main() {
         openDrawer: true,
       );
 
-      expect(bytes.sublist(0, 2), [0x1B, 0x40]);
+      // ESC @, then GS L 0 (no left margin) and GS W 16 (print area as wide as the image)
+      expect(bytes.sublist(0, 10), [0x1B, 0x40, 0x1D, 0x4C, 0, 0, 0x1D, 0x57, 16, 0]);
       expect(count(bytes, [0x1B, 0x70, 0x00, 0x19, 0xFA]), 1);
       // GS v 0, 2 bytes wide, 3 rows high, then the data
       final image = indexOf(bytes, [0x1D, 0x76, 0x30, 0x00, 2, 0, 3, 0]);
@@ -206,6 +230,14 @@ void main() {
       expect(PrinterConfig.fromJson(narrow.toJson()).narrowPrint, isTrue);
     });
 
+    test('a raw ESC/POS printer on 80 mm paper prints the full width, or 64 mm narrow', () {
+      const escPos = PrinterConfig(connection: PrinterConnection.network, host: '10.0.0.5');
+      expect(escPos.dotsPerLine, 576);
+      expect(escPos.printableWidthMm, 72);
+      expect(escPos.copyWith(narrowPrint: true).dotsPerLine, 512);
+      expect(escPos.copyWith(narrowPrint: true).printableWidthMm, 64);
+    });
+
     test('a chosen device fills in the config', () {
       const usb = PrinterDevice(connection: PrinterConnection.usb, id: '1305:1', name: 'TSP143');
       final cfg = usb.applyTo(const PrinterConfig(paperWidth: PaperWidth.mm58));
@@ -226,6 +258,77 @@ void main() {
   });
 
   group('Transports', () {
+    test('SNMP: a GetRequest encodes like net-snmp, a GetResponse is read', () {
+      expect(Snmp.getRequest('1.3.6.1.2.1.1.5.0', 1), [
+        0x30, 0x26, 0x02, 0x01, 0x00, 0x04, 0x06, ...'public'.codeUnits, //
+        0xA0, 0x19, 0x02, 0x01, 0x01, 0x02, 0x01, 0x00, 0x02, 0x01, 0x00, //
+        0x30, 0x0E, 0x30, 0x0C, 0x06, 0x08, 0x2B, 6, 1, 2, 1, 1, 5, 0, 0x05, 0x00,
+      ]);
+      expect(Snmp.parseResponse(snmpResponse(2, 'TM-T20II')), (2, 'TM-T20II'));
+      expect(Snmp.parseResponse(snmpResponse(1, null)), (1, null));
+      expect(Snmp.parseResponse([0x30, 0x05, 0x02]), isNull);
+    });
+
+    test('network printers are named by Star discovery, SNMP or ESC/POS GS I', () async {
+      // Answers each UDP request with reply(request), or not at all
+      Future<int> udpAgent(List<int>? Function(Uint8List request) reply) async {
+        final agent = await RawDatagramSocket.bind(InternetAddress.loopbackIPv4, 0);
+        agent.listen((event) {
+          final request = event == RawSocketEvent.read ? agent.receive() : null;
+          final answer = request == null ? null : reply(request.data);
+          if (answer != null) agent.send(answer, request!.address, request.port);
+        });
+        addTearDown(agent.close);
+        return agent.port;
+      }
+
+      final silent = await udpAgent((_) => null);
+      final snmp = await udpAgent((request) {
+        final id = request[17]; // request id, with every length one byte
+        // hrDeviceDescr missing, then sysName and sysDescr
+        return snmpResponse(id, id == 1 ? null : (id == 2 ? 'TM-T20II' : 'EPSON TM'));
+      });
+      // Trimmed from a TSP143IIILAN's reply
+      final star = await udpAgent(
+        (request) => [
+          ...'STR_BCAST'.codeUnits, ...List.filled(7, 0), ...'RS1.0.1'.codeUnits, //
+          ...List.filled(12, 0), ...'RTSP100LAN'.codeUnits, ...List.filled(30, 0),
+          ...'Star'.codeUnits, ...List.filled(40, 0),
+          ...'TSP143IIILAN (STR_T-001)'.codeUnits, ...List.filled(30, 0),
+        ],
+      );
+      final escPos = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
+      addTearDown(escPos.close);
+      final asked = <int>[];
+      escPos.listen(
+        (client) => client.listen((data) {
+          for (var i = 0; i + 2 < data.length; i += 3) {
+            asked.add(data[i + 2]);
+            client.add([...(data[i + 2] == 0x43 ? '_BTP-R580II' : '_SNBC').codeUnits, 0]);
+          }
+        }),
+      );
+      final closed = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
+      final closedPort = closed.port;
+      await closed.close();
+
+      final devices = PrinterDevices(listsPaired: false);
+      Future<String?> name({int? snmpPort, int? starPort, int? port}) => devices.networkName(
+        '127.0.0.1',
+        snmpPort: snmpPort ?? silent,
+        starPort: starPort ?? silent,
+        port: port ?? escPos.port,
+        timeout: const Duration(milliseconds: 300),
+      );
+
+      expect(await name(starPort: star), 'Star TSP143IIILAN');
+      expect(await name(snmpPort: snmp), 'TM-T20II');
+      expect(asked, isEmpty, reason: 'Star and SNMP printers are not sent GS I');
+      expect(await name(), 'SNBC BTP-R580II');
+      expect(asked, [0x43, 0x42]);
+      expect(await name(port: closedPort), isNull);
+    });
+
     test('network printers get the bytes over raw TCP', () async {
       final printer = await fakeNetworkPrinter();
       final bytes = Uint8List.fromList(

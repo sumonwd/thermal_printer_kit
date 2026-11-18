@@ -1,10 +1,13 @@
+import 'dart:async';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:printing/printing.dart';
 
 import 'printer_config.dart';
 import 'printer_device.dart';
+import 'snmp.dart';
 import 'windows_raw_printer.dart';
 
 /// Finds printers and sends them bytes:
@@ -138,7 +141,8 @@ class PrinterDevices {
 
   /// Looks for printers listening on [port] on this device's private IPv4
   /// networks (each /24 the device is on), [batchSize] addresses at a time.
-  /// Emits each printer's address as it is found.
+  /// Emits each printer as it is found, named by [networkName], or by its
+  /// address and port when it doesn't give a name.
   Stream<PrinterDevice> scanNetwork({
     int port = 9100,
     Duration timeout = const Duration(milliseconds: 500),
@@ -172,10 +176,181 @@ class PrinterDevices {
           }
         }),
       );
-      for (final ip in found.nonNulls) {
-        yield PrinterDevice(connection: PrinterConnection.network, id: ip, name: '$ip:$port');
+      final named = await Future.wait(
+        found.nonNulls.map((ip) async => (ip, await networkName(ip, port: port))),
+      );
+      for (final (ip, name) in named) {
+        yield PrinterDevice(
+          connection: PrinterConnection.network,
+          id: ip,
+          name: name ?? '$ip:$port',
+        );
       }
     }
+  }
+
+  /// A network printer's name, asked without printing anything:
+  ///
+  /// 1. Star discovery (UDP 22222): Star LAN printers give their model.
+  /// 2. SNMP (UDP 161, community `public`): the model, host name or
+  ///    description, as Epson TM, office and many other printers give.
+  /// 3. With [askEscPos], when neither answers: the ESC/POS printer ID
+  ///    command (GS I) on [port], which gives the maker and model of most
+  ///    LAN receipt printers. Star and SNMP printers are never sent it, as an
+  ///    office printer could print it as text.
+  ///
+  /// Each step waits up to [timeout]. Null when nothing answers.
+  Future<String?> networkName(
+    String host, {
+    int port = 9100,
+    bool askEscPos = true,
+    Duration timeout = const Duration(milliseconds: 800),
+    @visibleForTesting int snmpPort = 161,
+    @visibleForTesting int starPort = 22222,
+  }) async {
+    final InternetAddress address;
+    try {
+      address = (await InternetAddress.lookup(host)).first;
+    } on Exception {
+      return null;
+    }
+    final (star, snmp) = await (
+      _starName(address, starPort, timeout),
+      _snmpName(address, snmpPort, timeout),
+    ).wait;
+    if (star != null || snmp != null || !askEscPos) return star ?? snmp;
+    return _escPosName(address, port, timeout);
+  }
+
+  // Star discovery request, as Star's own utilities send it
+  static final _starRequest = [
+    ...'STR_BCAST'.codeUnits,
+    0, 0, 0, 0, 0, 0, 0, //
+    ...'RQ1.0.0'.codeUnits,
+    0, 0, 0x1C, 0x64, 0x31,
+  ];
+
+  static Future<String?> _starName(InternetAddress address, int port, Duration timeout) async {
+    String? name;
+    await _askUdp(address, port, [_starRequest], timeout, (reply) {
+      if (reply.length < 9 || String.fromCharCodes(reply.take(9)) != 'STR_BCAST') return false;
+      // The model is the text with the emulation after it: "TSP143IIILAN (STR_T-001)"
+      for (final text in RegExp(r'[\x20-\x7E]{4,}').allMatches(String.fromCharCodes(reply))) {
+        final model = RegExp(r'^(\S.*?) \(.+\)$').firstMatch(text[0]!)?[1];
+        if (model != null) {
+          name = model.toLowerCase().startsWith('star') ? model : 'Star $model';
+          return true;
+        }
+      }
+      return false;
+    });
+    return name;
+  }
+
+  // hrDeviceDescr.1 (model), sysName.0, sysDescr.0: the first that answers
+  static const _nameOids = ['1.3.6.1.2.1.25.3.2.1.3.1', '1.3.6.1.2.1.1.5.0', '1.3.6.1.2.1.1.1.0'];
+
+  static Future<String?> _snmpName(InternetAddress address, int port, Duration timeout) async {
+    final answers = <int, String?>{};
+    await _askUdp(
+      address,
+      port,
+      [for (var i = 0; i < _nameOids.length; i++) Snmp.getRequest(_nameOids[i], i + 1)],
+      timeout,
+      (reply) {
+        final response = Snmp.parseResponse(reply);
+        if (response != null) answers[response.$1] = response.$2;
+        return answers.length == _nameOids.length;
+      },
+    );
+    for (var i = 1; i <= _nameOids.length; i++) {
+      final name = _cleanName(answers[i]);
+      if (name != null) return name;
+    }
+    return null;
+  }
+
+  /// GS I 67 (model name), then GS I 66 (maker): each answered `_` text NUL.
+  static Future<String?> _escPosName(InternetAddress address, int port, Duration timeout) async {
+    Socket? socket;
+    try {
+      socket = await Socket.connect(address, port, timeout: timeout);
+      final received = <int>[];
+      var arrived = Completer<void>();
+      socket.listen(
+        (data) {
+          received.addAll(data);
+          if (!arrived.isCompleted) arrived.complete();
+        },
+        onError: (_) {},
+        cancelOnError: true,
+      );
+      Future<String?> ask(int n) async {
+        received.clear();
+        socket!.add([0x1D, 0x49, n]);
+        final deadline = DateTime.now().add(timeout);
+        while (true) {
+          final start = received.indexOf(0x5F);
+          final end = start < 0 ? -1 : received.indexOf(0x00, start);
+          if (end > 0) return _cleanName(String.fromCharCodes(received, start + 1, end));
+          final left = deadline.difference(DateTime.now());
+          if (left <= Duration.zero) return null;
+          arrived = Completer<void>();
+          await arrived.future.timeout(left, onTimeout: () {});
+        }
+      }
+
+      final model = await ask(0x43);
+      if (model == null) return null;
+      final maker = await ask(0x42);
+      return maker == null || model.toLowerCase().startsWith(maker.toLowerCase())
+          ? model
+          : '$maker $model';
+    } on Exception {
+      return null;
+    } finally {
+      socket?.destroy();
+    }
+  }
+
+  /// Sends [requests] over UDP and hands each reply to [onReply] until it
+  /// returns true or [timeout] passes.
+  static Future<void> _askUdp(
+    InternetAddress address,
+    int port,
+    List<List<int>> requests,
+    Duration timeout,
+    bool Function(Uint8List reply) onReply,
+  ) async {
+    RawDatagramSocket? socket;
+    try {
+      socket = await RawDatagramSocket.bind(
+        address.type == InternetAddressType.IPv6
+            ? InternetAddress.anyIPv6
+            : InternetAddress.anyIPv4,
+        0,
+      );
+      final done = Completer<void>();
+      socket.listen((event) {
+        final packet = event == RawSocketEvent.read ? socket?.receive() : null;
+        if (packet != null && onReply(packet.data) && !done.isCompleted) done.complete();
+      }, onError: (_) {});
+      for (final request in requests) {
+        socket.send(request, address, port);
+      }
+      await done.future.timeout(timeout, onTimeout: () {});
+    } on Exception {
+      // No answer
+    } finally {
+      socket?.close();
+    }
+  }
+
+  /// The first line of [text], trimmed and at most 64 characters, or null.
+  static String? _cleanName(String? text) {
+    final name = text?.split(RegExp(r'[\r\n\x00]')).first.trim() ?? '';
+    if (name.isEmpty) return null;
+    return name.length > 64 ? name.substring(0, 64) : name;
   }
 
   static bool _isPrivate(List<String> p) {

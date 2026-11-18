@@ -25,6 +25,7 @@ class PrinterCommands {
     switch (language) {
       case PrinterLanguage.escPos:
         out.add(const [0x1B, 0x40]); // ESC @ initialise
+        _escPosPrintArea(out, image.bytesPerRow * 8);
         if (openDrawer) out.add(_escPosDrawer);
         for (var c = 0; c < copies; c++) {
           _escPosImage(out, image);
@@ -93,6 +94,15 @@ class PrinterCommands {
 
   // ESC BEL 20 20 (200 ms pulse, 200 ms delay), then BEL: drive external device 1
   static const _starPrntDrawer = [0x1B, 0x07, 0x14, 0x14, 0x07];
+
+  /// GS L 0 0, GS W n: no left margin and a print area [dots] wide. Images
+  /// are clipped to the print area, and many 80 mm printers start with a
+  /// 512-dot (64 mm) one after ESC @, which cuts the right side off. Printers
+  /// narrow a larger width down to what their head can print.
+  static void _escPosPrintArea(BytesBuilder out, int dots) {
+    out.add(const [0x1D, 0x4C, 0x00, 0x00]);
+    out.add([0x1D, 0x57, dots & 0xFF, dots >> 8]);
+  }
 
   /// ESC J n: feed n dot rows (1/203 inch on most printers), 8 per mm.
   static void _escPosFeed(BytesBuilder out, int mm) {

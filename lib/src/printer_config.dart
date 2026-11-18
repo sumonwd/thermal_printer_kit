@@ -107,9 +107,10 @@ class PrinterConfig {
   /// Roll paper width.
   final PaperWidth paperWidth;
 
-  /// Whether the print head is the narrower 180 dpi kind (Epson TM-T88 and
-  /// TM-T82, some Xprinter and Rongta models): 512 dots on 80 mm paper, 360 on
-  /// 58 mm. A job drawn for a 203 dpi head is cut off on the right there.
+  /// Whether the printer prints fewer dots across: 512 on 80 mm paper, 360 on
+  /// 58 mm. Turn it on when the right side of a job is cut off: printers with
+  /// a 180 dpi head (Epson TM-T88 and TM-T82, some Xprinter and Rongta models)
+  /// and 80 mm printers that print only 64 mm wide.
   final bool narrowPrint;
 
   /// Blank paper fed after each copy, before the cut, in millimetres (raw
@@ -140,7 +141,7 @@ class PrinterConfig {
       connection == PrinterConnection.network;
 
   /// Dots the head prints across: 576 / 384 at 203 dpi (72 / 48 mm), or
-  /// 512 / 360 on a narrower 180 dpi head ([narrowPrint]).
+  /// 512 / 360 with [narrowPrint].
   int get dotsPerLine => switch ((paperWidth, narrowPrint)) {
     (PaperWidth.mm80, false) => 576,
     (PaperWidth.mm80, true) => 512,

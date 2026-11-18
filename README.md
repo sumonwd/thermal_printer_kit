@@ -20,7 +20,8 @@ Print receipts on thermal printers from Flutter, over every common connection, w
 - **Paper:** 58 mm and 80 mm rolls, 203 dpi and narrower 180 dpi heads, extra feed before the cut.
 - **Cash drawer** kick on all three printer languages.
 - **Discovery:** paired and nearby Bluetooth printers, USB printers, driver printers, and a scan of
-  the local network for printers on port 9100.
+  the local network for printers on port 9100, named by Star discovery, SNMP or the ESC/POS printer
+  ID command (such as "Star TSP143IIILAN" or "SNBC BTP-R580II").
 - Errors are thrown as `PrinterException`, with messages written to be shown to users.
 
 ## Install

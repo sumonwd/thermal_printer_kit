@@ -174,6 +174,14 @@ class _PrinterDemoState extends State<PrinterDemo> {
                 () => _config = _config.copyWith(paperWidth: s.first),
               ),
             ),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Narrow print'),
+              subtitle: const Text('Turn on if the right side is cut off'),
+              value: _config.narrowPrint,
+              onChanged: (v) =>
+                  setState(() => _config = _config.copyWith(narrowPrint: v)),
+            ),
           ],
           if (connection == PrinterConnection.network)
             TextField(
