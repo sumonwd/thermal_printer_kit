@@ -6,7 +6,7 @@ Print receipts on thermal printers from Flutter, over every common connection, w
 |---|:-:|:-:|:-:|:-:|:-:|
 | Bluetooth Classic (SPP, paired printers) | ✅ | ❌ (Apple allows no Classic printers) | ❌ | ❌ | ❌ |
 | Bluetooth LE | ✅ | ✅ | ❌ | ❌ | ❌ |
-| USB | ✅ (OTG) | ❌ | ✅ (installed printer, RAW job) | ❌ | ❌ |
+| USB | ✅ (OTG) | ❌ | ✅ (direct, or installed printer RAW job) | ❌ | ❌ |
 | Network (Wi-Fi / LAN, raw TCP port 9100) | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Installed printer driver, no dialog | ❌ | ❌ | ✅ | ✅ | ✅ |
 | System print dialog | ✅ | ✅ | ✅ | ✅ | ✅ |
@@ -139,8 +139,13 @@ and sent as raster image commands in strips, followed by a feed and partial cut:
 - StarPRNT: `ESC GS S 1` images, `ESC J` feed, `ESC d 3` cut, `ESC BEL` + `BEL` drawer.
 
 Bluetooth LE printers get the bytes on their writable characteristic (common printer services such
-as `18F0/2AF1` first) in MTU-sized chunks. Windows USB printers get a RAW spooler job through
-`winspool` (FFI), so the installed driver passes the commands through unchanged.
+as `18F0/2AF1` first) in MTU-sized chunks.
+
+On Windows, `usbDevices()` lists two kinds of printer. Printers plugged in by USB are written to
+directly by their device path, so they need no printer driver or print queue: those on Windows' own
+USB printer driver (`usbprint.sys`) and SNBC's port driver (`BYPUSB.sys`, tested with a BTP-R580II).
+Installed printers get a RAW spooler job through `winspool`, so their driver passes the commands
+through unchanged. A USB printer that is also installed is listed both ways.
 
 ## License
 

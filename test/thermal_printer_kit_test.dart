@@ -435,6 +435,58 @@ void main() {
     }, skip: !Platform.isWindows);
   });
 
+  group('WindowsUsbPrinter', () {
+    const snbc = r'\\?\USB#VID_154F&PID_154F#6&164ad6b7&0&2#{744a56c6-63f7-11d3-88bc-5254ab1470fd}';
+    const snbcOtherSocket =
+        r'\\?\usb#vid_154f&pid_154f#5&d727a80&0&8#{744a56c6-63f7-11d3-88bc-5254ab1470fd}';
+    const epson =
+        r'\\?\USB#VID_04b8&PID_118a&MI_01#7&37d52ecd&0&0001#{28d78fad-5a12-11d1-ae5b-0000f803a8c2}';
+
+    test('tells a device path from an installed printer name', () {
+      expect(WindowsUsbPrinter.isDevicePath(snbc), isTrue);
+      expect(WindowsUsbPrinter.isDevicePath('Star TSP143'), isFalse);
+      expect(WindowsUsbPrinter.isDevicePath('1359:1359'), isFalse);
+    });
+
+    test('names a printer by its maker and USB ids', () {
+      expect(WindowsUsbPrinter.nameOf(snbc), 'SNBC USB printer');
+      expect(WindowsUsbPrinter.nameOf(epson), 'USB printer');
+      expect(WindowsUsbPrinter.addressOf(epson), '04B8:118A');
+      expect(WindowsUsbPrinter.addressOf(r'\\?\somewhere'), r'\\?\somewhere');
+      expect(WindowsUsbPrinter.vendorIdOf(snbc), 0x154F);
+      expect(WindowsUsbPrinter.vendorIdOf(r'\\?\somewhere'), isNull);
+    });
+
+    test('finds a saved printer by its path, whatever the case', () {
+      expect(WindowsUsbPrinter.pathFor(snbc.toLowerCase(), [epson, snbc]), snbc);
+    });
+
+    test('finds a saved printer moved to another USB socket', () {
+      expect(WindowsUsbPrinter.pathFor(snbc, [epson, snbcOtherSocket]), snbcOtherSocket);
+    });
+
+    test('does not send a job to a different printer', () {
+      expect(WindowsUsbPrinter.pathFor(snbc, [epson]), isNull);
+      expect(WindowsUsbPrinter.pathFor(snbc, []), isNull);
+    });
+
+    test('lays a GUID out as Windows does', () {
+      expect(WindowsUsbPrinter.guidBytes('28d78fad-5a12-11d1-ae5b-0000f803a8c2'), [
+        0xad, 0x8f, 0xd7, 0x28, 0x12, 0x5a, 0xd1, 0x11, //
+        0xae, 0x5b, 0x00, 0x00, 0xf8, 0x03, 0xa8, 0xc2,
+      ]);
+    });
+
+    test('a printer that is not connected fails with a message', () async {
+      const missing =
+          r'\\?\USB#VID_FFFF&PID_FFFF#1&2&3#{28d78fad-5a12-11d1-ae5b-0000f803a8c2}';
+      expect(
+        WindowsUsbPrinter.send(missing, Uint8List.fromList([0x1B])),
+        throwsA(isA<PrinterException>().having((e) => e.code, 'code', 'not_found')),
+      );
+    }, skip: !Platform.isWindows);
+  });
+
   group('ThermalPrinter', () {
     test('sends an image with the feed, cut and drawer to a network printer', () async {
       final printer = await fakeNetworkPrinter();

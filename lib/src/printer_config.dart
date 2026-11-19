@@ -6,8 +6,9 @@ enum PrinterConnection {
   /// LE printers on Android, Bluetooth LE printers on iOS.
   bluetooth,
 
-  /// USB printer: USB OTG on Android, an installed printer on Windows that is
-  /// sent a RAW spooler job.
+  /// USB printer: USB OTG on Android. On Windows, a printer plugged in by USB
+  /// that is written to directly, or an installed printer that is sent a RAW
+  /// spooler job.
   usb,
 
   /// LAN / Wi-Fi printer, raw TCP (port 9100 on most printers). Every platform.
@@ -88,8 +89,8 @@ class PrinterConfig {
 
   /// The chosen `PrinterDevice.id`: a Bluetooth MAC address (Classic), `ble:`
   /// plus the id of a Bluetooth LE printer, USB `vendorId:productId`
-  /// (Android), a Windows printer name (USB on Windows) or the driver
-  /// printer's URL.
+  /// (Android), a USB device path or Windows printer name (USB on Windows) or
+  /// the driver printer's URL.
   final String? deviceId;
 
   /// The chosen printer's name, for display.
