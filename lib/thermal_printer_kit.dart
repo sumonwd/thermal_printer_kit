@@ -11,3 +11,4 @@ export 'src/printer_device.dart';
 export 'src/printer_devices.dart';
 export 'src/thermal_printer.dart';
 export 'src/windows_raw_printer.dart';
+export 'src/windows_usb_printer.dart';

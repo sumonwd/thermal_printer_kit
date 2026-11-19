@@ -1,3 +1,9 @@
+## 0.1.2
+
+- Windows: `usbDevices()` also lists printers plugged in by USB that have no print queue, and
+  `sendUsb` writes to them directly by their device path (`WindowsUsbPrinter`). Covers printers on
+  Windows' own USB printer driver and SNBC's USB port driver.
+
 ## 0.1.0
 
 - First release.

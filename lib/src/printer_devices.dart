@@ -9,12 +9,14 @@ import 'printer_config.dart';
 import 'printer_device.dart';
 import 'snmp.dart';
 import 'windows_raw_printer.dart';
+import 'windows_usb_printer.dart';
 
 /// Finds printers and sends them bytes:
 ///
 /// - Bluetooth and Android USB through the plugin's native code (Android:
 ///   Bluetooth Classic, Bluetooth LE and USB OTG; iOS: Bluetooth LE).
-/// - Windows USB printers through the print spooler (RAW jobs).
+/// - Windows USB printers directly by their device path, or through the
+///   print spooler (RAW jobs) when they are installed.
 /// - Network printers over raw TCP, on every platform.
 /// - Installed driver printers through the `printing` package.
 class PrinterDevices {
@@ -38,7 +40,8 @@ class PrinterDevices {
   /// first (Android).
   static bool get bluetoothNeedsPairing => Platform.isAndroid;
 
-  /// USB OTG (Android) or installed printers sent raw commands (Windows).
+  /// USB OTG (Android), or USB and installed printers sent raw commands
+  /// (Windows).
   static bool get supportsUsb => Platform.isAndroid || Platform.isWindows;
 
   /// Installed printers that print PDFs without a dialog.
@@ -106,8 +109,10 @@ class PrinterDevices {
   /// Settings (iOS), to pair a printer or allow Bluetooth.
   Future<void> openBluetoothSettings() => _call('openBluetoothSettings');
 
-  /// USB OTG devices with a printer-like endpoint (Android), or installed
-  /// printers (Windows), which are sent raw commands.
+  /// USB OTG devices with a printer-like endpoint (Android). On Windows,
+  /// installed printers, which are sent raw commands through the spooler, then
+  /// the printers plugged in by USB, which are sent them directly and need no
+  /// driver. A USB printer that is also installed is listed both ways.
   Future<List<PrinterDevice>> usbDevices() async {
     if (Platform.isWindows) {
       final printers = await Printing.listPrinters();
@@ -115,6 +120,13 @@ class PrinterDevices {
         for (final p in printers)
           if (p.isAvailable)
             PrinterDevice(connection: PrinterConnection.usb, id: p.name, name: p.name),
+        for (final path in WindowsUsbPrinter.devicePaths())
+          PrinterDevice(
+            connection: PrinterConnection.usb,
+            id: path,
+            name: WindowsUsbPrinter.nameOf(path),
+            vendorId: WindowsUsbPrinter.vendorIdOf(path),
+          ),
       ];
     }
     final list = await _call<List>('usbDevices') ?? const [];
@@ -365,10 +377,12 @@ class PrinterDevices {
       ? _call('bleSend', {'id': id.substring(PrinterDevice.blePrefix.length), 'bytes': bytes})
       : _call('bluetoothSend', {'address': id, 'bytes': bytes});
 
-  /// Sends to a USB OTG printer (`vendorId:productId`, Android) or an
-  /// installed printer by name (Windows, as a RAW job named [documentName]).
+  /// Sends to a USB OTG printer (`vendorId:productId`, Android). On Windows,
+  /// to a USB printer by its device path, or to an installed printer by name
+  /// (as a RAW job named [documentName]).
   Future<void> sendUsb(String id, Uint8List bytes, {String documentName = 'Receipt'}) async {
     if (Platform.isWindows) {
+      if (WindowsUsbPrinter.isDevicePath(id)) return WindowsUsbPrinter.send(id, bytes);
       return WindowsRawPrinter.send(id, bytes, documentName: documentName);
     }
     final parts = id.split(':');

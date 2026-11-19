@@ -6,8 +6,8 @@ class PrinterDevice {
   final PrinterConnection connection;
 
   /// Bluetooth address, `ble:` plus a Bluetooth LE printer's id, USB
-  /// `vendorId:productId` (Android), Windows printer name (USB on Windows),
-  /// driver printer URL, or IP address (network).
+  /// `vendorId:productId` (Android), USB device path or Windows printer name
+  /// (USB on Windows), driver printer URL, or IP address (network).
   final String id;
 
   /// The printer's name.
@@ -18,7 +18,7 @@ class PrinterDevice {
   /// too, after the printers, since many cheap printers don't say so.
   final bool isPrinter;
 
-  /// USB vendor id (Android USB printers).
+  /// USB vendor id (Android USB printers, and Windows ones found by USB).
   final int? vendorId;
 
   /// Creates a device entry.
