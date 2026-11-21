@@ -8,7 +8,7 @@ import 'package:printing/printing.dart';
 import 'printer_config.dart';
 import 'printer_device.dart';
 import 'snmp.dart';
-import 'windows_raw_printer.dart';
+import 'windows_raw_printer.dart' if (dart.library.js_interop) 'windows_raw_printer_web.dart';
 import 'windows_usb_printer.dart';
 
 /// Finds printers and sends them bytes:
@@ -27,31 +27,40 @@ class PrinterDevices {
 
   /// Creates the device layer. [listsPaired] overrides whether paired
   /// Bluetooth Classic printers are listed (Android only by default).
-  PrinterDevices({bool? listsPaired}) : _listsPaired = listsPaired ?? Platform.isAndroid;
+  PrinterDevices({bool? listsPaired}) : _listsPaired = listsPaired ?? _isAndroid;
 
   /// How long [bluetoothDevices] looks for Bluetooth LE printers.
   static const bleScanSeconds = 4;
 
   /// Android: paired Classic printers and Bluetooth LE ones. iOS: Bluetooth LE
   /// only (Apple doesn't let apps use Classic printers).
-  static bool get supportsBluetooth => Platform.isAndroid || Platform.isIOS;
+  static bool get supportsBluetooth => _isAndroid || _isIOS;
 
   /// Bluetooth Classic printers have to be paired in the system settings
   /// first (Android).
-  static bool get bluetoothNeedsPairing => Platform.isAndroid;
+  static bool get bluetoothNeedsPairing => _isAndroid;
 
   /// USB OTG (Android), or USB and installed printers sent raw commands
   /// (Windows).
-  static bool get supportsUsb => Platform.isAndroid || Platform.isWindows;
+  static bool get supportsUsb => _isAndroid || _isWindows;
 
   /// Installed printers that print PDFs without a dialog.
-  static bool get supportsDriver => Platform.isWindows || Platform.isMacOS || Platform.isLinux;
+  static bool get supportsDriver =>
+      !kIsWeb && (Platform.isWindows || Platform.isMacOS || Platform.isLinux);
+
+  /// Wi-Fi/LAN printers over a TCP socket, which browsers can't open.
+  static bool get supportsNetwork => !kIsWeb;
+
+  // `Platform` throws on the web, so each check rules the web out first.
+  static bool get _isAndroid => !kIsWeb && Platform.isAndroid;
+  static bool get _isIOS => !kIsWeb && Platform.isIOS;
+  static bool get _isWindows => !kIsWeb && Platform.isWindows;
 
   /// The connections this platform supports, in the order to offer them.
   static List<PrinterConnection> get supportedConnections => [
     if (supportsBluetooth) PrinterConnection.bluetooth,
     if (supportsUsb) PrinterConnection.usb,
-    PrinterConnection.network,
+    if (supportsNetwork) PrinterConnection.network,
     if (supportsDriver) PrinterConnection.driver,
     PrinterConnection.system,
   ];
@@ -68,7 +77,7 @@ class PrinterDevices {
   Future<BluetoothScan> bluetoothDevices() async {
     if (!await requestBluetoothPermission()) {
       throw PrinterException(
-        Platform.isIOS
+        _isIOS
             ? 'Allow Bluetooth for this app in Settings to use Bluetooth printers.'
             : 'Allow "Nearby devices" for this app to use Bluetooth printers.',
         code: 'permission',
@@ -114,7 +123,7 @@ class PrinterDevices {
   /// the printers plugged in by USB, which are sent them directly and need no
   /// driver. A USB printer that is also installed is listed both ways.
   Future<List<PrinterDevice>> usbDevices() async {
-    if (Platform.isWindows) {
+    if (_isWindows) {
       final printers = await Printing.listPrinters();
       return [
         for (final p in printers)
@@ -381,7 +390,7 @@ class PrinterDevices {
   /// to a USB printer by its device path, or to an installed printer by name
   /// (as a RAW job named [documentName]).
   Future<void> sendUsb(String id, Uint8List bytes, {String documentName = 'Receipt'}) async {
-    if (Platform.isWindows) {
+    if (_isWindows) {
       if (WindowsUsbPrinter.isDevicePath(id)) return WindowsUsbPrinter.send(id, bytes);
       return WindowsRawPrinter.send(id, bytes, documentName: documentName);
     }

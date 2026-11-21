@@ -2,7 +2,7 @@ name: thermal_printer_kit
 description: >-
   Print receipts on thermal printers over Bluetooth (Classic and BLE), USB,
   Wi-Fi/LAN, printer drivers or the print dialog. ESC/POS, Star Line and StarPRNT.
-version: 0.1.2
+version: 0.1.3
 repository: https://github.com/sumonwd/thermal_printer_kit
 issue_tracker: https://github.com/sumonwd/thermal_printer_kit/issues
 topics:

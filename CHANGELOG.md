@@ -1,3 +1,8 @@
+## 0.1.3
+
+- Web: the package compiles for the web. Windows-only FFI code is replaced by stubs there, and
+  `PrinterDevices` offers only the system print dialog (no Bluetooth, USB, network or driver).
+
 ## 0.1.2
 
 - Windows: `usbDevices()` also lists printers plugged in by USB that have no print queue, and
